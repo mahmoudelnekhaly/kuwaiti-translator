@@ -1,8 +1,8 @@
 import json
 import os
+import re
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
+from collections import Counter
 
 dict_file = "kuwaiti_dict.json"
 
@@ -13,41 +13,48 @@ if os.path.exists(dict_file):
 else:
     kuwaiti_dict = {}
 
-# وظيفة التحديث اليدوي
-def load_gumar_sample():
-    sample_sentences = [
-        "ليش تأخرت وايد؟",
-        "تبي أوديك السوق؟",
-        "ما قلنا لك من قبل؟",
-        "ترى الجو حلو اليوم بالكويت"
-    ]
-    return sample_sentences
+# عينات من Gumar Corpus وتمثيل YouTube
+gumar_data = [
+    {"dialect": "kuwaiti", "text": "ليش تأخرت علينا؟"},
+    {"dialect": "kuwaiti", "text": "تدري ان الجمعية مسكرة؟"},
+    {"dialect": "kuwaiti", "text": "أبي أطلع مشوار وبعدين أرد"},
+]
 
-def scrape_forum_example():
-    try:
-        url = "https://www.q8yat.com/forumdisplay.php?f=5"
-        response = requests.get(url, timeout=5)
-        soup = BeautifulSoup(response.text, "html.parser")
-        posts = soup.find_all("a", class_="threadtitle")
-        return [post.get_text(strip=True) for post in posts][:10]
-    except:
-        return []
+youtube_transcripts = [
+    "السلام عليكم شباب، اليوم بنسولف عن الزحمة في الشوارع",
+    "ترى الحر مو طبيعي اليوم بالكويت",
+    "شلون الواحد يتحمل الصيف؟"
+]
 
-def update_dictionary(sentences):
+def extract_words(text):
+    text = re.sub(r"[^؀-ۿ\s]", "", text)
+    words = text.split()
+    return [w.strip().lower() for w in words if len(w) > 2]
+
+def update_dict_from_sources(gumar, youtube):
+    word_counter = Counter()
+    for entry in gumar:
+        if entry["dialect"] == "kuwaiti":
+            word_counter.update(extract_words(entry["text"]))
+    for line in youtube:
+        word_counter.update(extract_words(line))
+
     new_entries = 0
-    for sentence in sentences:
-        for word in sentence.strip().split():
-            word = word.strip("؟!.,،").lower()
-            if word not in kuwaiti_dict and len(word) > 2:
-                kuwaiti_dict[word] = ""
-                new_entries += 1
+    for word in word_counter:
+        if word not in kuwaiti_dict:
+            kuwaiti_dict[word] = ""
+            new_entries += 1
+
+    with open(dict_file, "w", encoding="utf-8") as f:
+        json.dump(kuwaiti_dict, f, ensure_ascii=False, indent=2)
+
     return new_entries
 
 # واجهة Streamlit
 st.set_page_config(page_title="مترجم كويتي → فصحى", layout="wide")
 st.title("📘 مترجم من اللهجة الكويتية إلى العربية الفصحى")
 
-tab1, tab2, tab3 = st.tabs(["🔤 الترجمة", "📚 تحرير القاموس", "🔄 تحديث يدوي"])
+tab1, tab2, tab3 = st.tabs(["🔤 الترجمة", "📚 تحرير القاموس", "📥 تحديث تلقائي"])
 
 with tab1:
     user_input = st.text_area("أدخل نصاً باللهجة الكويتية", height=150)
@@ -70,10 +77,7 @@ with tab2:
         st.success("✅ تم حفظ القاموس بنجاح!")
 
 with tab3:
-    st.subheader("🔄 تحديث القاموس من مصادر تلقائية")
-    if st.button("تحديث القاموس الآن"):
-        sentences = load_gumar_sample() + scrape_forum_example()
-        added = update_dictionary(sentences)
-        with open(dict_file, "w", encoding="utf-8") as f:
-            json.dump(kuwaiti_dict, f, ensure_ascii=False, indent=2)
-        st.success(f"✅ تم تحديث القاموس وإضافة {added} كلمة جديدة.")
+    st.subheader("📥 تحديث تلقائي من Gumar + YouTube")
+    if st.button("تحديث القاموس من البيانات"):
+        added = update_dict_from_sources(gumar_data, youtube_transcripts)
+        st.success(f"✅ تم إضافة {added} مفردة جديدة من Gumar و YouTube.")
