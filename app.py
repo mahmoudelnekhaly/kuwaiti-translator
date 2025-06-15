@@ -1,83 +1,88 @@
-import json
 import os
+import json
 import re
+import requests
+import tarfile
 import streamlit as st
 from collections import Counter
 
 dict_file = "kuwaiti_dict.json"
+gumar_url = "https://github.com/CAMeL-Lab/Gumar-Ngrams/releases/download/v1.0/KW.tar.xz"
+gumar_archive = "KW.tar.xz"
+gumar_file = "KW/1-grams_KW.tsv"
+extracted_file = "kuwaiti_gumar_dict.json"
 
-# تحميل القاموس
+# تحميل القاموس الأساسي
 if os.path.exists(dict_file):
     with open(dict_file, "r", encoding="utf-8") as f:
         kuwaiti_dict = json.load(f)
 else:
     kuwaiti_dict = {}
 
-# عينات من Gumar Corpus وتمثيل YouTube
-gumar_data = [
-    {"dialect": "kuwaiti", "text": "ليش تأخرت علينا؟"},
-    {"dialect": "kuwaiti", "text": "تدري ان الجمعية مسكرة؟"},
-    {"dialect": "kuwaiti", "text": "أبي أطلع مشوار وبعدين أرد"},
-]
+def download_and_extract_gumar():
+    if not os.path.exists(gumar_archive):
+        with requests.get(gumar_url, stream=True) as r:
+            with open(gumar_archive, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+    if not os.path.exists("KW"):
+        with tarfile.open(gumar_archive) as tar:
+            tar.extractall()
 
-youtube_transcripts = [
-    "السلام عليكم شباب، اليوم بنسولف عن الزحمة في الشوارع",
-    "ترى الحر مو طبيعي اليوم بالكويت",
-    "شلون الواحد يتحمل الصيف؟"
-]
+def extract_words_from_gumar():
+    gumar_dict = {}
+    with open(gumar_file, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            parts = line.strip().split('\t')
+            if len(parts) >= 2:
+                gumar_dict[parts[0]] = ""
+            if i >= 20000:
+                break
+    with open(extracted_file, "w", encoding="utf-8") as f:
+        json.dump(gumar_dict, f, ensure_ascii=False, indent=2)
+    return gumar_dict
 
-def extract_words(text):
-    text = re.sub(r"[^؀-ۿ\s]", "", text)
-    words = text.split()
-    return [w.strip().lower() for w in words if len(w) > 2]
-
-def update_dict_from_sources(gumar, youtube):
-    word_counter = Counter()
-    for entry in gumar:
-        if entry["dialect"] == "kuwaiti":
-            word_counter.update(extract_words(entry["text"]))
-    for line in youtube:
-        word_counter.update(extract_words(line))
-
-    new_entries = 0
-    for word in word_counter:
+def merge_with_main_dict(new_words):
+    added = 0
+    for word in new_words:
         if word not in kuwaiti_dict:
             kuwaiti_dict[word] = ""
-            new_entries += 1
-
+            added += 1
     with open(dict_file, "w", encoding="utf-8") as f:
         json.dump(kuwaiti_dict, f, ensure_ascii=False, indent=2)
-
-    return new_entries
+    return added
 
 # واجهة Streamlit
-st.set_page_config(page_title="مترجم كويتي → فصحى", layout="wide")
-st.title("📘 مترجم من اللهجة الكويتية إلى العربية الفصحى")
+st.set_page_config(page_title="مترجم كويتي مع Gumar", layout="wide")
+st.title("📘 مترجم اللهجة الكويتية إلى العربية الفصحى")
 
-tab1, tab2, tab3 = st.tabs(["🔤 الترجمة", "📚 تحرير القاموس", "📥 تحديث تلقائي"])
+tab1, tab2, tab3 = st.tabs(["🔤 الترجمة", "📚 تحرير القاموس", "📥 تحديث من Gumar"])
 
 with tab1:
-    user_input = st.text_area("أدخل نصاً باللهجة الكويتية", height=150)
+    text = st.text_area("🗣️ أدخل نصًا باللهجة الكويتية:", height=150)
     if st.button("ترجم"):
-        translated = " ".join(kuwaiti_dict.get(word, word) for word in user_input.split())
-        st.subheader("📝 الترجمة إلى الفصحى")
-        st.write(translated)
+        translation = " ".join(kuwaiti_dict.get(word, word) for word in text.split())
+        st.subheader("✅ الترجمة إلى العربية الفصحى")
+        st.write(translation)
 
 with tab2:
-    st.subheader("📖 تحرير القاموس اليدوي")
-    updated = False
+    st.subheader("📚 تحرير القاموس")
+    changed = False
     for key in list(kuwaiti_dict.keys()):
-        new_val = st.text_input(f"{key}:", kuwaiti_dict[key])
+        new_val = st.text_input(f"{key}", kuwaiti_dict[key])
         if new_val != kuwaiti_dict[key]:
             kuwaiti_dict[key] = new_val
-            updated = True
-    if updated:
+            changed = True
+    if changed:
         with open(dict_file, "w", encoding="utf-8") as f:
             json.dump(kuwaiti_dict, f, ensure_ascii=False, indent=2)
-        st.success("✅ تم حفظ القاموس بنجاح!")
+        st.success("✅ تم تحديث القاموس")
 
 with tab3:
-    st.subheader("📥 تحديث تلقائي من Gumar + YouTube")
-    if st.button("تحديث القاموس من البيانات"):
-        added = update_dict_from_sources(gumar_data, youtube_transcripts)
-        st.success(f"✅ تم إضافة {added} مفردة جديدة من Gumar و YouTube.")
+    st.subheader("📥 تحميل ودمج مفردات Gumar")
+    if st.button("ابدأ التحديث من Gumar"):
+        with st.spinner("📦 جاري تحميل البيانات..."):
+            download_and_extract_gumar()
+            new_words = extract_words_from_gumar()
+            added = merge_with_main_dict(new_words)
+        st.success(f"✅ تم إضافة {added} مفردة جديدة من Gumar إلى القاموس.")
